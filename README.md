@@ -39,3 +39,20 @@ With our quantum state representation of our bitstrings, we can think of the pro
 
 Again, appologies for the budget unicode-math. This vector will be the input to our algorithm that will output a new vector, so called |ψₘₚₛ⟩, which is much closer to the actual distribution of the data. In particular, we aim to find the property that: |⟨s|ψₘₚₛ⟩|² ≈ π(s) = 1/2ᴺ⁻¹ for all even-parity bitstrings s. 
 
+Before we get that much further into the algorithm, lets first just build some code to construct this quantum state from a bitstring. This is really not the most complicated code: 
+```julia
+function bitstring2quantumstate(bitstring::Vector{Int})
+    qubits = [b==0 ? [1,0] : [0, 1] for b ∈ bitstring] # convert bits to qubits where 0 → |d⟩ and 1 → |u⟩
+
+    ψ = popat!(qubits, 1) # grab the first qubit and remove it from the vector 
+    for qubit ∈ qubits 
+        ψ = kron(ψ, qubit) # get tensor product between the tensored last qubits and the next qubit 
+    end # for
+
+    ψ 
+end # function bitstring2quantumstate
+```
+
+We, just as you would think, convert each of the bits to qubits, and then just tensor them all up in order. 
+
+Now that we have all that random bitstring stuff out of the way, we start on constructing the actual algorithm. 

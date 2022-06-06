@@ -33,3 +33,19 @@ function generate_evenparity_bitstrings(N::Int)
 
     bitstrings 
 end # function generate_evenparity_bitstrings
+
+"""
+Takes a bitstring, represented as a bitvector, and transforms it into quantum state
+
+"""
+function bitstring2quantumstate(bitstring::Vector{Int})
+    qubits = [b==0 ? [1,0] : [0, 1] for b ∈ bitstring] # convert bits to qubits where 0 → |d⟩ and 1 → |u⟩
+
+    ψ = popat!(qubits, 1) # grab the first qubit and remove it from the vector 
+    for qubit ∈ qubits 
+        ψ = kron(ψ, qubit) # get tensor product between the tensored last qubits and the next qubit 
+    end # for
+
+    ψ 
+end # function bitstring2quantumstate
+
