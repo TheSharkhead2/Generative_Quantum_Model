@@ -1,4 +1,4 @@
-# Linear Algebra Generative Model
+# Generative Model Using Quantum Logic
 
 This project is essentially my final project for my high school linear algebra class. Contruct a model similar to the model described [here](https://iopscience.iop.org/article/10.1088/2632-2153/ab8731/pdf) and [here](https://arxiv.org/pdf/2004.05631.pdf). As I understand this model, we can use the idea of a density operator from quantum logic in order to recover information about a probability density function from samples of that PDF. This allows us to "train" our model on something like English language and construct a model that can produce English language back for us, or at least that is the idea. 
 
