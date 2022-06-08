@@ -37,7 +37,7 @@ With our quantum state representation of our bitstrings, we can think of the pro
 |ψ⟩ = 1/√N_T ⋅ ∑ |s⟩ 
 ```
 
-Again, appologies for the budget unicode-math. This vector will be the input to our algorithm that will output a new vector, so called |ψₘₚₛ⟩, which is much closer to the actual distribution of the data. In particular, we aim to find the property that: |⟨s|ψₘₚₛ⟩|² ≈ π(s) = 1/2ᴺ⁻¹ for all even-parity bitstrings s. 
+Again, appologies for the budget unicode-math. This vector will be the input to our algorithm that will output a new vector, so called |ψₘₚₛ⟩, which is much closer to the actual distribution of the data. In particular, we aim to find the property that: |⟨s|ψₘₚₛ⟩|² ≈ π(s) = 1/2ᴺ⁻¹ for all even-parity bitstrings s. It is best to think of the |ψ⟩ vector as the training data for our model as it is the empirical probabilities observed in our data set. 
 
 Before we get that much further into the algorithm, lets first just build some code to construct this quantum state from a bitstring. This is really not the most complicated code: 
 ```julia
@@ -55,4 +55,140 @@ end # function bitstring2quantumstate
 
 We, just as you would think, convert each of the bits to qubits, and then just tensor them all up in order. 
 
-Now that we have all that random bitstring stuff out of the way, we start on constructing the actual algorithm. 
+Now that we have all that random bitstring stuff out of the way, we start on constructing the actual algorithm. Our algorithm is going to be N steps, where they are inductive steps meaning all steps past step 3 are nearly identical to step 2. 
+
+The first step to the algorithm is basically just here so that things look nicer. We basically just define the 2x2 identity operator on ℂ² which is exactly what you know it to be. Ones on the diagonal (from top left to bottom right) and zeros otherwise. 
+
+That was a pretty lame step, but this gets more interesting at step 2. Note that this is where things really got confusing for me so hopefully I can do everything right here. 
+
+We start the second step by reshaping our input vector, |ψ⟩, in a way such that it becomes an map from V → V^(⊗N-1), so that we can apply the identity operator (or the operator from our last step), giving us the second vector, |ψ₂⟩. Functionally this gives us the same thing as |ψ⟩, but this sets up the induction for our algorithm which is important. 
+
+While I am still not entirely sure on this step, I believe we can do this conversion through the following code: 
+
+```julia 
+M_1 = reshape(ψ, :, 2)
+```
+
+Once we have reshaped the vector, we can apply the identity operator from before: 
+
+```julia 
+M_1 = M_1 * Identity(2)
+``` 
+
+After we apply the matrix, we can reshape the map back into a vector: 
+
+```julia
+ψ_2 = reshape(M_1, :, 1)
+```
+
+At this point, we want to find the density operator for |ψ₂⟩ which we can do with an outer product: |ψ₂⟩⟨ψ₂|. Simply, we can implement an outer product like so: 
+```julia 
+function outer_product(ψ_1, ψ_2)
+    kron(transpose(ψ_1), ψ_2) 
+end # function outer_product
+```
+
+Now while this density operator is cool and all, we really want to find the reduced density operator which comes about from a partial trace. We define a partial trace on one subspace like so: ```∑ Mᵢₐ,ₐⱼ |xᵢ⟩⟨xⱼ|``` where |xᵢ⟩ forms a basis of the other subspace. So in probably more proper terms, the space in for which we are calculating the partial trace has the basis |yₐ⟩ and |xᵢ⟩ ⊗ |yₐ⟩ gives us a basis vector for the greater vectorspace. 
+
+In our case, we know |xᵢ⟩ will just be the standard basis. This is convenient as we can essentially simplify this to constructing an d x d matrix, where d = 2ᵃ where the dimension of the space we are finding the partial trace of is ⊗N-a, and each entry is just the above sum for i, j representing the location in this matrix. 
+
+In order to implement the partial trace in code, we can of course start by creating an empty matrix of the right size: 
+
+```julia 
+function partial_trace(a::Int, ρ::Matrix{ComplexF64}; base = 2)
+    partialTrace = Matrix{Complex}(zeros(base^a, base^a)) # initialize partial trace matrix
+    ...
+end # function partial_trace
+```
+
+You will also see that I am taking in some peculiar inputs. Because I possibly have a naive assumption that I can extend this algorithm to use something with more information that qubits, I added the base input which just gives us the dimension of those initial spaces. For qubits, this is just 2. I then have a, which defines the dimension we are taking the partial trace over as ⊗N-a (the last N-a qubits as I won't need the implementation the other way as far as I can tell). And finally ρ is the full density matrix. 
+
+From here I do a loop over all indices in the partial trace matrix, then a loop over all "sub-diagonals," and add this to a sum inside our partial trace matrix. At the end I can return the partial trace which is *hopefully* correct (I know, I inspire confidence): 
+
+```julia 
+function partial_trace(a::Int, ρ::Matrix{ComplexF64}; base = 2)
+    partialTrace = Matrix{Complex}(zeros(base^a, base^a)) # initialize partial trace matrix
+
+    for index ∈ CartesianIndices(partialTrace) # loop through every index in partial trace (every basis combination for other space)
+        for α ∈ 1:div(size(ρ)[1], size(partialTrace)[1]) # loop through the required dimension of the space we are taking a partial trace of
+            partialTrace[index] += ρ[index[1]*α, index[2]*α] # add the corresponding density operator to the partial trace matrix
+        end # for
+    end # for
+
+    partialTrace
+end # function partial_trace
+```
+
+From here we want to diagonalize the partial trace operator. We can do that simply through eigenvalue decomposition. Doing this we end up with: UDU^† where we have eigenvalues in the diagonal matrix (D) and eigenvectors as columns in U (the dagger operator here is the complex conjugate transpose). Specifically, we are interested in the operator U. 
+
+For philosophical reasons, the paper justifies dropping the two eigenvectors corresponding to the smallest eigenvalues. This is because we assume that paradigms like language have inherit structure and logic and we can relate removing the less important eigenvectors to removing sampling error. In other words, we want to remove sensitivity of the model so we can hopefully pull out factors and structure that have a larger influence over what we are modeling. 
+
+By dropping these two eigenvectors, we end up with a 4 x 2 matrix. In code we can do this simply with: 
+
+```julia 
+U = eigvecs(partialTrace)[:, 3:4]
+```
+
+As Julia sorts our eigenvalues in order of importance for us, we can just take the later two. 
+
+Okay, but we now have a matrix which can no longer act as an operator so we will lose dimensions applying it. What do we want to do with this? Well we actually do want to apply it, and every time we do apply one of these U matrices we will lose 1 qubit from our state vector. When we collapse all of our dimensions, we compose all of our Us together to create our final MPS, the desired vector. 
+
+How do we apply this U? Well we reshape our state vector similar to how we did for the first step, just this time with the proper number of dimensions (2 qubits instead of 1 earlier): 
+
+```julia
+M_k = reshape(ψ_k, :, 4)
+```
+
+Then apply our U to this operator: 
+
+```julia 
+MU = M_k * U
+```
+
+And we reshape one final time to get the next state vector: 
+
+```julia 
+ψ_k = reshape(MU, :, 1)
+```
+
+All together these steps look like this: 
+
+```julia 
+for _ ∈ 1:N-2 # loop N-2 times 
+    partialTrace = partial_trace(2, outer_product(ψ_k, ψ_k)) # calculate partial trace of the density matrix for ψ_k for ⊗N-2
+    
+    U = eigvecs(partialTrace)[:, 3:4] # find eigenvectors of partial trace and remove the two with the smallest eigenvalues
+
+    M_k = reshape(ψ_k, :, 4) # reshape ψ_k into a map V^(⊗2) → V^(⊗N-2)
+
+    MU = M_k * U # apply the U to the map 
+
+    ψ_k = reshape(MU, :, 1) # reshape the map back into a vector
+
+    push!(Umatrices, U) # push the U into the Umatrices vector
+end # for
+```
+
+Now you will notice that this is looping N-2 times for an algorithm that is supposed to have N steps. Well the first step was applying the identity, so that is put outside the loop, and the last step is a little bit special. At the end of these, in total, N-2 steps, we have a ψ_k vector that is dimension 4. We reshape this into a linear mapping from a 2-dimensional space to another 2-dimensional space. We are going to use this as our final mapping in our MPS tensor (our output). This step is simple in code: 
+
+```julia 
+U_N = reshape(ψ_k, :, 2)
+```
+
+So here is where I am very unconfident that I am following the thesis (I was already a little bit unconfident that I was doing it right, this is the step I really doubt). This is the step of constructing the MPS vector. Essentially the entire mapping which we applied to the ψ vectors earlier, well we can think of our output vector as that mapping without the initial ψ vector we are applying everything to. This is a mapping itself which can be reshaped into the final output vector. 
+
+As I am not entirely fluent tensor network diagrams, here is where my doubts really come in. But as I understand what is happening, we can think of this state as if we were applying quantum operators to various qubits. So if we wanted to apply the CNOT gate to the 2nd and 3rd qubit in a 5-qubit system, well we would use the opeartor: I2 ⊗ CNOT ⊗ I4. In this instance, we start with the identity operator on N-1 qubits. I am thinking about it this way both because this is how I can get a vector of the correct size but also because the U operators are applied to every qubit but the last qubit which we will think of incorporating as "pluggin in" our final U into that qubit. We then just apply U_k ⊗ Identity(2^(N-3-k+1)) for all k, at the end applying the 2x2 U_N to a m x 2 matrix. As a final step, we want to reshape this matrix such that instead of going "from the" last qubit to the others, it is just a vector holding N qubits. In total, this final bit of code is the following: 
+
+```julia
+# generate MPS 
+MPS = Identity(2^(N-1)) # initialize MPS
+for U ∈ Umatrices # loop through all Us 
+    MPS = MPS * kron(U, Identity(2^(N-2-k))) 
+end # for
+
+MPS = MPS * U_N # apply the last U to the MPS
+
+reshape(transpose(MPS), :, 1) # reshape the MPS into a vector
+```
+
+Now I am really not sure how good my model is. Anecdotally I might say "it almost looks like it works." For actual numbers, running on 5-bit strings giving it all even-bitstrings as values, it gave an average probability of 0.0073 to odd bit-strings and an average probability of 0.0298 to even bit-strings. The difference is maybe better seen in the medians with a median probability of 0.00298 given to odd and 0.0349 given to even. Maximums are also a little bit telling with odd maxing out at 0.0228 and even at 0.0666. For reference we were aiming for zero probability for an odd string and 0.0625 for even. Now obviously this is a terrible comparison, especially in comparison to the comparison in the thesis; however, I think it definitely shows that this model gave a much higher probability to even bit strings than odd bit strings which is really promising to it actually being correct, which I am still not sure on. Trying different lengths for the bitstrings showed a fairly inconsistent pattern though so I might have to lay on the side of I did something wrong. 
