@@ -37,7 +37,7 @@ With our quantum state representation of our bitstrings, we can think of the pro
 |ψ⟩ = 1/√N_T ⋅ ∑ |s⟩ 
 ```
 
-Again, appologies for the budget unicode-math. This vector will be the input to our algorithm that will output a new vector, so called |ψₘₚₛ⟩, which is much closer to the actual distribution of the data. In particular, we aim to find the property that: |⟨s|ψₘₚₛ⟩|² ≈ π(s) = 1/2ᴺ⁻¹ for all even-parity bitstrings s. It is best to think of the |ψ⟩ vector as the training data for our model as it is the empirical probabilities observed in our data set. 
+Again, apologizes for the budget unicode-math. This vector will be the input to our algorithm that will output a new vector, so called |ψₘₚₛ⟩, which is much closer to the actual distribution of the data. In particular, we aim to find the property that: |⟨s|ψₘₚₛ⟩|² ≈ π(s) = 1/2ᴺ⁻¹ for all even-parity bitstrings s. It is best to think of the |ψ⟩ vector as the training data for our model as it is the empirical probabilities observed in our data set. 
 
 Before we get that much further into the algorithm, lets first just build some code to construct this quantum state from a bitstring. This is really not the most complicated code: 
 ```julia
@@ -69,6 +69,23 @@ While I am still not entirely sure on this step, I believe we can do this conver
 M_1 = reshape(ψ, :, 2)
 ```
 
+What this simple code does is literally reshape the nx1 vector to a n/2 x 2 vector. This means we create a map from V → V^(⊗N-1), which we want. As an example, we would map the following vector like so: 
+```
+1
+2
+3                   1  6
+4                   2  7
+5         →         3  8
+6                   4  9
+7                   5  10
+8
+9
+10
+
+```
+
+Forgive the poor formatting again. As a more specific description of what exactly this line is doing. ```reshape(A, n, m)``` will reshape the matrix/vector A into one of dimensions n x m. 
+
 Once we have reshaped the vector, we can apply the identity operator from before: 
 
 ```julia 
@@ -81,16 +98,16 @@ After we apply the matrix, we can reshape the map back into a vector:
 ψ_2 = reshape(M_1, :, 1)
 ```
 
-At this point, we want to find the density operator for |ψ₂⟩ which we can do with an outer product: |ψ₂⟩⟨ψ₂|. Simply, we can implement an outer product like so: 
+At this point, we want to find the density operator for |ψ₂⟩ which we can think of as a quantum version of a probability distribution. However important for our situation, we can also define a density operator for a classical probability distribution and the other way around. Our vector |ψ₂⟩ can be thought of as a vector where each entry is the square root of the probability of the qubit string corresponding to that entry. It turns out, that to get the density operator for this state, we can simply compute an outer product: |ψ₂⟩⟨ψ₂|. We can implement an outer product like so: 
 ```julia 
 function outer_product(ψ_1, ψ_2)
-    kron(transpose(ψ_1), ψ_2) 
+    ψ_1 * transpose(ψ_2) 
 end # function outer_product
 ```
 
-Now while this density operator is cool and all, we really want to find the reduced density operator which comes about from a partial trace. We define a partial trace on one subspace like so: ```∑ Mᵢₐ,ₐⱼ |xᵢ⟩⟨xⱼ|``` where |xᵢ⟩ forms a basis of the other subspace. So in probably more proper terms, the space in for which we are calculating the partial trace has the basis |yₐ⟩ and |xᵢ⟩ ⊗ |yₐ⟩ gives us a basis vector for the greater vectorspace. 
+Now while this density operator is cool and all, we really want to find the reduced density operator which comes about from a partial trace. It turns out, that taking a partial trace of a density operator gives us another density operator which can be thought of as finding the marginal probability! So we can think of the density operator as encoding the probability of every bitstring occurring and when we take the partial trace to get the reduced density operator, that is akin to finding the probabilities for sub-bitstrings. We define a partial trace like so: ```∑ ρᵢₐ,ₐⱼ |xᵢ⟩⟨xⱼ|```. Here we can think of decomposing the full space into two subspaces tensored together where one has the |xᵢ⟩ basis and the other a |yₐ⟩ basis. Here we are taking the partial trace with respect to the |yₐ⟩ basis, so finding the marginal probabily (reduced density operator) for the |xᵢ⟩ basis. This is done by taking each of the states in the |xᵢ⟩ basis, so summing over all i and j, and then summing over a diagonal in the other basis (hence why we are summing over the coordinates in the full density opeartor of (i⋅a, j⋅a)). 
 
-In our case, we know |xᵢ⟩ will just be the standard basis. This is convenient as we can essentially simplify this to constructing an d x d matrix, where d = 2ᵃ where the dimension of the space we are finding the partial trace of is ⊗N-a, and each entry is just the above sum for i, j representing the location in this matrix. 
+In our case, we know |xᵢ⟩ will just be the standard basis. This is convenient as we can essentially simplify this to constructing an d x d matrix, where d = 2ᵃ where the dimension of the space we are finding the partial trace of is ⊗N-a (here a is the number of qubits in the subspace we are finding a reduced density for, sorry confusing to which it up), and each entry is just the above sum for i, j representing the location in this matrix. 
 
 In order to implement the partial trace in code, we can of course start by creating an empty matrix of the right size: 
 
@@ -190,5 +207,52 @@ MPS = MPS * U_N # apply the last U to the MPS
 
 reshape(transpose(MPS), :, 1) # reshape the MPS into a vector
 ```
+
+In full, the model, in code, looks like this: 
+
+```julia
+function generate_mps(ψ::Vector{ComplexF64}, N::Int)
+    # step 1 
+    M_1 = reshape(ψ, :, 2) # reshape into map V → V^(⊗N-1)
+
+    M_1 = M_1 * Identity(2) # apply the identity to the map 
+
+    ψ_2 = reshape(M_1, :, 1) # reshape map back into a vector
+
+    # further steps 
+    Umatrices = [] # empty vector to store all Us we create as they will be important 
+
+    ψ_k = ψ_2 # initialize ψ_k to ψ_2 
+    for _ ∈ 1:N-2 # loop N-2 times 
+        partialTrace = partial_trace(2, outer_product(ψ_k, ψ_k)) # calculate partial trace of the density matrix for ψ_k for ⊗N-2
+        
+        U = eigvecs(partialTrace)[:, 3:4] # find eigenvectors of partial trace and remove the two with the smallest eigenvalues
+    
+        M_k = reshape(ψ_k, :, 4) # reshape ψ_k into a map V^(⊗2) → V^(⊗N-2)
+
+        MU = M_k * U # apply the U to the map 
+
+        ψ_k = reshape(MU, :, 1) # reshape the map back into a vector
+
+        push!(Umatrices, U) # push the U into the Umatrices vector
+    end # for
+
+    # last step 
+    U_N = reshape(ψ_k, :, 2) # reshape ψ_k into a map V^(⊗1) → V^(⊗1)
+    
+    # generate MPS 
+    MPS = Identity(2^(N-1)) # initialize MPS
+    for (k, U) ∈ enumerate(Umatrices) # loop through all Us 
+        MPS = MPS * kron(U, Identity(2^(N-2-k))) 
+    end # for
+
+    MPS = MPS * U_N # apply the last U to the MPS
+
+    reshape(transpose(MPS), :, 1) # reshape the MPS into a vector
+
+end # function generate_mps
+```
+
+Our first step is to apply the first identity matrix as a formality. After that we start iterating N-2 times. On each iteration, we take the state vector at that step, which started by representing each possibility with the sqaure root of the probability in each index, and take the partial trace with respect to the last N-2 qubits of the density operator created by this state vector. This, in effect, finds the marginal probability of the first 2 qubits. We perform spectral decomposition on this matrix and throw out the eigenvectors corresponding the the smallest eigenvalues. This is done in an effort to reduce noise. These eigenvectors correspond to possible states of our subsystem (with corresponding eigenvalues being their probabilities of occuring). We reshape our state vector in order to apply the 4x2 matrix of eigenvectors to the first two qubits, in a way collapsing them into a combined state. We reshape this matrix back into a state vector, now with one less qubit, and continue the iteration. When the iteration is finished, we can simply define a final 2x2 operator, U_N, by reshaping the final state vector. And finally, using ideas from constructing quantum algorithms, we construct a map from N-1 qubits to 1 qubit from all of our Us (except the last one), and then apply the U_N matrix to the final qubit. After all of that, we reshape it back into a vector. We can think of this final vector as a MPS, matrix product state, which is the output of combining a bunch of matrices together. 
 
 Now I am really not sure how good my model is. Anecdotally I might say "it almost looks like it works." For actual numbers, running on 5-bit strings giving it all even-bitstrings as values, it gave an average probability of 0.0073 to odd bit-strings and an average probability of 0.0298 to even bit-strings. The difference is maybe better seen in the medians with a median probability of 0.00298 given to odd and 0.0349 given to even. Maximums are also a little bit telling with odd maxing out at 0.0228 and even at 0.0666. For reference we were aiming for zero probability for an odd string and 0.0625 for even. Now obviously this is a terrible comparison, especially in comparison to the comparison in the thesis; however, I think it definitely shows that this model gave a much higher probability to even bit strings than odd bit strings which is really promising to it actually being correct, which I am still not sure on. Trying different lengths for the bitstrings showed a fairly inconsistent pattern though so I might have to lay on the side of I did something wrong. 

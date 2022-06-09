@@ -3,7 +3,7 @@ Outer product. Essentially computing |ψ⟩⟨ψ|
 
 """
 function outer_product(ψ_1, ψ_2)
-    kron(transpose(ψ_1), ψ_2) 
+    ψ_1 * transpose(ψ_2) 
 end # function outer_product
 
 """
